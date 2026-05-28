@@ -53,15 +53,31 @@ sudo ./z13-dwt /dev/input/event-touchpad /dev/input/event-keyboard [...]
 
 ## Install On This Machine
 
-The included installer writes a root systemd service that starts the launcher:
+Install the binary, launcher, and tracked systemd unit:
+
+```sh
+sudo make install
+```
+
+This installs:
+
+- `/usr/local/bin/z13-dwt`
+- `/usr/local/libexec/z13-dwt/run-z13-dwt.sh`
+- `/etc/systemd/system/z13-dwt.service`
+
+Then enable and start the service:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now z13-dwt.service
+sudo systemctl restart z13-dwt.service
+```
+
+The helper script does the same install and service setup:
 
 ```sh
 sudo bash ./scripts/install-z13-dwt-system.sh
 ```
-
-The installer builds the binary, installs it to `/usr/local/bin/z13-dwt`,
-installs the launcher to `/usr/local/libexec/z13-dwt/run-z13-dwt.sh`, and writes
-`/etc/systemd/system/z13-dwt.service`.
 
 Check status:
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=Z13 disable while typing
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/z13-dwt/run-z13-dwt.sh
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
