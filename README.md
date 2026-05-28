@@ -1,35 +1,18 @@
 # z13-dwt
 
-Disable-while-typing helper for KDE Plasma Wayland systems where libinput does
-not expose native DWT for the touchpad.
+Disable tap-to-click while typing on ASUS ROG Flow Z13 keyboard covers under
+KDE Plasma/KWin.
 
-This was written for the ASUS ROG Flow Z13 keyboard cover, whose touchpad can
-register palm taps while typing. The daemon reads keyboard events as root and
-temporarily disables KWin's `tapToClick` setting for the touchpad. After the
-quiet period expires, it restores whatever `tapToClick` value was active before
-the suppression cycle began.
-
-## What It Does
-
-- Watches one touchpad event node and one or more keyboard event nodes.
-- On the first keypress after idle, reads the current KWin `tapToClick` value.
-- Sets `tapToClick=false`.
-- Extends the timer while typing continues.
-- Restores the saved value after the quiet period, 700 ms by default.
-- Resolves the active local graphical user through `systemd-logind`.
-- Drops privileges for KWin D-Bus calls instead of talking to the user's bus as
-  root.
+The daemon reads keyboard events from `/dev/input/event*` as root. When a key is
+pressed it sets the KWin touchpad property `tapToClick=false`; after the quiet
+period it sets `tapToClick=true`.
 
 ## Requirements
 
-- Linux
-- KDE Plasma/KWin with the `org.kde.KWin.InputDevice.tapToClick` D-Bus property
-- `systemd-logind`
+- Linux with `systemd-logind`
+- KDE Plasma/KWin exposing `org.kde.KWin.InputDevice.tapToClick`
 - `busctl`
-- root access for reading `/dev/input/event*`
-
-This is not a general libinput DWT implementation. It is a pragmatic KDE/KWin
-workaround for devices where native DWT is unavailable.
+- root access for `/dev/input/event*`
 
 ## Build
 
@@ -37,23 +20,9 @@ workaround for devices where native DWT is unavailable.
 make
 ```
 
-## Manual Run
+## Install
 
-The current launcher is tailored to the ROG Flow Z13 keyboard cover:
-
-```sh
-sudo ./scripts/run-z13-dwt.sh
-```
-
-For other devices, call the binary directly:
-
-```sh
-sudo ./z13-dwt /dev/input/event-touchpad /dev/input/event-keyboard [...]
-```
-
-## Install On This Machine
-
-Install the binary, launcher, and tracked systemd unit:
+Install files:
 
 ```sh
 sudo make install
@@ -65,49 +34,70 @@ This installs:
 - `/usr/local/libexec/z13-dwt/run-z13-dwt.sh`
 - `/etc/systemd/system/z13-dwt.service`
 
-Then enable and start the service:
+Enable and start:
 
 ```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now z13-dwt.service
-sudo systemctl restart z13-dwt.service
+sudo make enable-service
 ```
 
-The helper script does the same install and service setup:
+Restart after upgrades:
 
 ```sh
-sudo bash ./scripts/install-z13-dwt-system.sh
+sudo make restart-service
 ```
 
-Check status:
+One-command install and start:
+
+```sh
+sudo ./scripts/install-z13-dwt-system.sh
+```
+
+## Configuration
+
+The launcher defaults to the tested Flow Z13 touchpad path:
+
+```sh
+/dev/input/by-id/usb-ASUSTeK_Computer_Inc._GZ302EA-Keyboard-if03-event-mouse
+```
+
+Environment variables:
+
+- `Z13_DWT_TOUCHPAD`: touchpad event node or `/dev/input/by-id/...` path.
+- `Z13_DWT_QUIET_MS`: milliseconds after the last keypress before tap-to-click
+  is re-enabled. Default: `700`.
+- `Z13_DWT_DEBUG`: set to `1` for state logs.
+- `Z13_DWT_BIN`: override the binary used by `scripts/run-z13-dwt.sh`.
+
+For systemd, set environment overrides with a drop-in:
+
+```sh
+sudo systemctl edit z13-dwt.service
+```
+
+Example:
+
+```ini
+[Service]
+Environment=Z13_DWT_QUIET_MS=700
+```
+
+## Manual Run
+
+Using the Flow Z13 launcher:
+
+```sh
+sudo ./scripts/run-z13-dwt.sh
+```
+
+Direct binary invocation:
+
+```sh
+sudo ./z13-dwt /dev/input/event-touchpad /dev/input/event-keyboard [...]
+```
+
+## Status
 
 ```sh
 systemctl status z13-dwt.service
 journalctl -u z13-dwt.service -n 50
 ```
-
-## Device Notes
-
-On the Flow Z13 tested here:
-
-- touchpad: `/dev/input/by-id/usb-ASUSTeK_Computer_Inc._GZ302EA-Keyboard-if03-event-mouse`
-- keyboard sources are discovered from `/proc/bus/input/devices`
-
-If your device has a different touchpad path, set `Z13_DWT_TOUCHPAD` in the
-service environment or invoke the binary directly.
-
-## Configuration
-
-Environment variables:
-
-- `Z13_DWT_TOUCHPAD`: touchpad event node or stable `/dev/input/by-id/...` path.
-- `Z13_DWT_BIN`: binary path used by `scripts/run-z13-dwt.sh`.
-- `Z13_DWT_QUIET_MS`: suppression period after the last key event. Default:
-  `700`. Accepted range: `0` to `10000`.
-- `Z13_DWT_DEBUG`: set to `1` for state-transition logging.
-
-## Debugging
-
-The daemon caches the active KWin target session. If a cached D-Bus call fails,
-it re-queries `loginctl`, so logout/login or user switching should self-heal
-after at most one missed toggle.

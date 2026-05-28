@@ -215,63 +215,6 @@ static int set_tap_to_click(const char *touchpad_path, struct kwin_target *targe
     return -1;
 }
 
-static int get_tap_to_click_once(const char *object_path, const struct kwin_target *target, int *enabled) {
-    int pipefd[2];
-
-    if (pipe(pipefd) < 0)
-        die("pipe");
-
-    pid_t pid = fork();
-    if (pid < 0)
-        die("fork");
-    if (pid == 0) {
-        close(pipefd[0]);
-        dup2(pipefd[1], STDOUT_FILENO);
-        close(pipefd[1]);
-        setenv("DBUS_SESSION_BUS_ADDRESS", target->bus, 1);
-        if (initgroups(target->user, target->gid) < 0 ||
-            setgid(target->gid) < 0 ||
-            setuid(target->uid) < 0)
-            _exit(126);
-        execlp("busctl", "busctl", "--user", "get-property",
-               "org.kde.KWin", object_path, "org.kde.KWin.InputDevice",
-               "tapToClick", (char *)NULL);
-        _exit(127);
-    }
-
-    close(pipefd[1]);
-    char out[64] = {0};
-    ssize_t n = read(pipefd[0], out, sizeof out - 1);
-    close(pipefd[0]);
-
-    int status = wait_child(pid);
-
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0 || n <= 0)
-        return -1;
-
-    char type[16], value[16];
-    if (sscanf(out, "%15s %15s", type, value) == 2 && strcmp(type, "b") == 0) {
-        *enabled = (strcmp(value, "true") == 0);
-        return 0;
-    }
-
-    return -1;
-}
-
-static int get_tap_to_click(const char *touchpad_path, struct kwin_target *target, int *enabled) {
-    char object_path[PATH_MAX];
-    build_object_path(touchpad_path, object_path, sizeof object_path);
-
-    if (target->user[0] && get_tap_to_click_once(object_path, target, enabled) == 0)
-        return 0;
-    if (resolve_kwin_target(target) < 0)
-        return -1;
-    if (get_tap_to_click_once(object_path, target, enabled) == 0)
-        return 0;
-
-    return -1;
-}
-
 static int open_fd(const char *path) {
     int fd = open(path, O_RDONLY | O_NONBLOCK);
     if (fd < 0)
@@ -318,7 +261,6 @@ int main(int argc, char **argv) {
 
     long long reenable_at_ms = 0;
     int tap_disabled = 0;
-    int saved_tap_enabled = 1;
 
     for (;;) {
         if (stop_requested)
@@ -337,10 +279,10 @@ int main(int argc, char **argv) {
         }
 
         if (rc == 0 && tap_disabled) {
-            set_tap_to_click(touchpad_path, &kwin, saved_tap_enabled);
+            set_tap_to_click(touchpad_path, &kwin, 1);
             tap_disabled = 0;
             if (debug_enabled())
-                printf("tap-to-click restored\n");
+                printf("tap-to-click enabled\n");
             continue;
         }
 
@@ -356,10 +298,6 @@ int main(int argc, char **argv) {
                 if (ev.type == EV_KEY && ev.value != 0) {
                     reenable_at_ms = now_ms() + quiet_ms;
                     if (!tap_disabled) {
-                        if (get_tap_to_click(touchpad_path, &kwin, &saved_tap_enabled) < 0) {
-                            saved_tap_enabled = 1;
-                            fprintf(stderr, "warn: could not read current tapToClick state, defaulting restore to true\n");
-                        }
                         if (set_tap_to_click(touchpad_path, &kwin, 0) < 0)
                             continue;
                         tap_disabled = 1;
@@ -376,7 +314,7 @@ int main(int argc, char **argv) {
     }
 
     if (tap_disabled)
-        set_tap_to_click(touchpad_path, &kwin, saved_tap_enabled);
+        set_tap_to_click(touchpad_path, &kwin, 1);
 
     for (int i = 0; i < nfds; i++)
         close(kfds[i]);

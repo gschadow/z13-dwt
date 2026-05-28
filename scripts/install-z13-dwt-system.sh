@@ -9,11 +9,7 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   exit 1
 fi
 
-make -C "$repo_root" install
-
-systemctl daemon-reload
-systemctl enable --now z13-dwt.service
-systemctl restart z13-dwt.service
+make -C "$repo_root" install enable-service restart-service
 
 echo "Installed z13-dwt binary, launcher, and systemd unit"
 echo "Started z13-dwt.service"

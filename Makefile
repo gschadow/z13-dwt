@@ -4,6 +4,7 @@ LIBEXECDIR ?= $(PREFIX)/libexec
 SYSTEMD_UNITDIR ?= /etc/systemd/system
 CC ?= cc
 CFLAGS ?= -O2 -Wall -Wextra
+SYSTEMCTL ?= systemctl
 
 all: z13-dwt
 
@@ -18,4 +19,12 @@ install: z13-dwt
 clean:
 	rm -f z13-dwt
 
-.PHONY: all install clean
+enable-service:
+	$(SYSTEMCTL) daemon-reload
+	$(SYSTEMCTL) enable --now z13-dwt.service
+
+restart-service:
+	$(SYSTEMCTL) daemon-reload
+	$(SYSTEMCTL) restart z13-dwt.service
+
+.PHONY: all install clean enable-service restart-service
