@@ -51,6 +51,15 @@ static int debug_enabled(void) {
     return debug && *debug && strcmp(debug, "0") != 0;
 }
 
+static const char *default_touchpad_path(void) {
+    const char *path = getenv("Z13_DWT_TOUCHPAD");
+
+    if (path && *path)
+        return path;
+
+    return "/dev/input/by-id/usb-ASUSTeK_Computer_Inc._GZ302EA-Keyboard-if03-event-mouse";
+}
+
 static long long quiet_period_ms(void) {
     const char *value = getenv("Z13_DWT_QUIET_MS");
     char *end = NULL;
@@ -222,10 +231,79 @@ static int open_fd(const char *path) {
     return fd;
 }
 
+static int touchpad_event_name(const char *touchpad_path, char *buf, size_t len) {
+    char resolved[PATH_MAX];
+    const char *source = touchpad_path;
+
+    if (realpath(touchpad_path, resolved) != NULL)
+        source = resolved;
+
+    const char *leaf = strrchr(source, '/');
+    leaf = leaf ? leaf + 1 : source;
+
+    if (strncmp(leaf, "event", 5) != 0)
+        return -1;
+    if (strlen(leaf) >= len)
+        return -1;
+
+    snprintf(buf, len, "%s", leaf);
+    return 0;
+}
+
+static int find_event_name(const char *line, char *buf, size_t len) {
+    const char *event = strstr(line, "event");
+    char *end = NULL;
+    long number;
+
+    if (!event)
+        return -1;
+
+    errno = 0;
+    number = strtol(event + 5, &end, 10);
+    if (errno != 0 || end == event + 5 || number < 0)
+        return -1;
+
+    snprintf(buf, len, "event%ld", number);
+    return 0;
+}
+
+static int discover_keyboards(const char *touchpad_path, char paths[][PATH_MAX], int max_paths) {
+    char skip[64] = {0};
+    FILE *fp;
+    char line[1024];
+    int count = 0;
+
+    if (touchpad_event_name(touchpad_path, skip, sizeof skip) < 0) {
+        fprintf(stderr, "warn: could not resolve touchpad event name for %s\n", touchpad_path);
+        skip[0] = '\0';
+    }
+
+    fp = fopen("/proc/bus/input/devices", "r");
+    if (!fp)
+        die("open /proc/bus/input/devices");
+
+    while (fgets(line, sizeof line, fp) && count < max_paths) {
+        char event[64];
+
+        if (strncmp(line, "H: Handlers=", 12) != 0 || !strstr(line, "kbd"))
+            continue;
+        if (find_event_name(line, event, sizeof event) < 0)
+            continue;
+        if (skip[0] && strcmp(event, skip) == 0)
+            continue;
+
+        snprintf(paths[count], PATH_MAX, "/dev/input/%s", event);
+        count++;
+    }
+
+    fclose(fp);
+    return count;
+}
+
 int main(int argc, char **argv) {
-    if (argc < 3) {
+    if (argc > 1 && argc < 3) {
         fprintf(stderr,
-                "usage: %s <touchpad-event> <keyboard-event> [keyboard-event ...]\n",
+                "usage: %s [<touchpad-event> <keyboard-event> [keyboard-event ...]]\n",
                 argv[0]);
         return 2;
     }
@@ -239,15 +317,32 @@ int main(int argc, char **argv) {
 
     setvbuf(stdout, NULL, _IOLBF, 0);
 
-    const char *touchpad_path = argv[1];
+    const char *touchpad_path = argc >= 3 ? argv[1] : default_touchpad_path();
     const long long quiet_ms = quiet_period_ms();
     struct kwin_target kwin = {0};
     int kfds[16];
     int nfds = 0;
-    for (int i = 2; i < argc && nfds < (int)(sizeof kfds / sizeof kfds[0]); i++) {
-        int fd = open_fd(argv[i]);
-        if (fd >= 0)
+    char discovered[16][PATH_MAX];
+    const char *keyboard_paths[16];
+    int keyboard_count = 0;
+
+    if (argc >= 3) {
+        for (int i = 2; i < argc && keyboard_count < (int)(sizeof keyboard_paths / sizeof keyboard_paths[0]); i++)
+            keyboard_paths[keyboard_count++] = argv[i];
+    } else {
+        keyboard_count = discover_keyboards(touchpad_path, discovered,
+                                            (int)(sizeof discovered / sizeof discovered[0]));
+        for (int i = 0; i < keyboard_count; i++)
+            keyboard_paths[i] = discovered[i];
+    }
+
+    for (int i = 0; i < keyboard_count; i++) {
+        int fd = open_fd(keyboard_paths[i]);
+        if (fd >= 0) {
+            if (debug_enabled())
+                printf("watching keyboard %s\n", keyboard_paths[i]);
             kfds[nfds++] = fd;
+        }
     }
     if (nfds == 0)
         die("open keyboards");

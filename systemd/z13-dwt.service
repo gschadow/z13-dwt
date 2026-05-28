@@ -4,7 +4,7 @@ After=multi-user.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/libexec/z13-dwt/run-z13-dwt.sh
+ExecStart=/usr/local/bin/z13-dwt
 Restart=always
 RestartSec=1
 
