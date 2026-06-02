@@ -1,4 +1,5 @@
 // z13-dwt.c
+// Copyright (c) 2026, Gunther Schadow. All rights reserved.
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
