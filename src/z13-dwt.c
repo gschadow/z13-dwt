@@ -179,6 +179,16 @@ static int build_object_path(const char *touchpad_path, char *object_path, size_
     return 0;
 }
 
+static void log_touchpad_selection(const char *touchpad_path, long long quiet_ms) {
+    char resolved[PATH_MAX];
+    char object_path[PATH_MAX];
+    const char *resolved_path = realpath(touchpad_path, resolved) ? resolved : "(unresolved)";
+
+    build_object_path(touchpad_path, object_path, sizeof object_path);
+    printf("touchpad path=%s resolved=%s kwin_object=%s quiet_ms=%lld\n",
+           touchpad_path, resolved_path, object_path, quiet_ms);
+}
+
 static int set_tap_to_click_once(const char *object_path, const struct kwin_target *target, int enabled) {
     const char *value = enabled ? "true" : "false";
     pid_t pid = fork();
@@ -293,6 +303,7 @@ static int discover_keyboards(const char *touchpad_path, char paths[][PATH_MAX],
             continue;
 
         snprintf(paths[count], PATH_MAX, "/dev/input/%s", event);
+        printf("keyboard candidate path=%s source=auto\n", paths[count]);
         count++;
     }
 
@@ -327,8 +338,10 @@ int main(int argc, char **argv) {
     int keyboard_count = 0;
 
     if (argc >= 3) {
-        for (int i = 2; i < argc && keyboard_count < (int)(sizeof keyboard_paths / sizeof keyboard_paths[0]); i++)
+        for (int i = 2; i < argc && keyboard_count < (int)(sizeof keyboard_paths / sizeof keyboard_paths[0]); i++) {
             keyboard_paths[keyboard_count++] = argv[i];
+            printf("keyboard candidate path=%s source=argv\n", argv[i]);
+        }
     } else {
         keyboard_count = discover_keyboards(touchpad_path, discovered,
                                             (int)(sizeof discovered / sizeof discovered[0]));
@@ -336,11 +349,12 @@ int main(int argc, char **argv) {
             keyboard_paths[i] = discovered[i];
     }
 
+    log_touchpad_selection(touchpad_path, quiet_ms);
+
     for (int i = 0; i < keyboard_count; i++) {
         int fd = open_fd(keyboard_paths[i]);
         if (fd >= 0) {
-            if (debug_enabled())
-                printf("watching keyboard %s\n", keyboard_paths[i]);
+            printf("keyboard opened path=%s fd=%d\n", keyboard_paths[i], fd);
             kfds[nfds++] = fd;
         }
     }

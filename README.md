@@ -87,3 +87,6 @@ sudo ./z13-dwt /dev/input/event-touchpad /dev/input/event-keyboard [...]
 systemctl status z13-dwt.service
 journalctl -u z13-dwt.service -n 50
 ```
+
+At startup the journal logs the selected touchpad, KWin object path, quiet
+period, keyboard candidates, and opened keyboard devices.
