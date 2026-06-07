@@ -3,7 +3,7 @@
 Disable tap-to-click while typing on ASUS ROG Flow Z13 keyboard covers under
 KDE Plasma/KWin.
 
-By default `z13-dwt` uses the tested Flow Z13 touchpad path, discovers keyboard
+By default `z13-dwt` discovers the Flow Z13 keyboard-cover touchpad and keyboard
 event devices from `/proc/bus/input/devices`, disables KWin `tapToClick` while
 typing, and enables `tapToClick` again after a quiet period.
 
@@ -41,15 +41,13 @@ Installed files:
 
 ## Configuration
 
-Default touchpad path:
-
-```sh
-/dev/input/by-id/usb-ASUSTeK_Computer_Inc._GZ302EA-Keyboard-if03-event-mouse
-```
+The built-in auto-detection looks for the `GZ302EA-Keyboard Touchpad` input
+device and keyboard-cover devices named `GZ302EA-Keyboard` or `N-KEY Device`.
 
 Environment variables:
 
-- `Z13_DWT_TOUCHPAD`: touchpad event node or `/dev/input/by-id/...` path.
+- `Z13_DWT_TOUCHPAD`: override touchpad event node, for example
+  `/dev/input/event5`.
 - `Z13_DWT_QUIET_MS`: milliseconds after the last keypress before tap-to-click
   is enabled again. Default: `700`.
 - `Z13_DWT_DEBUG`: set to `1` for state logs.

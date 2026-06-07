@@ -51,15 +51,6 @@ static int debug_enabled(void) {
     return debug && *debug && strcmp(debug, "0") != 0;
 }
 
-static const char *default_touchpad_path(void) {
-    const char *path = getenv("Z13_DWT_TOUCHPAD");
-
-    if (path && *path)
-        return path;
-
-    return "/dev/input/by-id/usb-ASUSTeK_Computer_Inc._GZ302EA-Keyboard-if03-event-mouse";
-}
-
 static long long quiet_period_ms(void) {
     const char *value = getenv("Z13_DWT_QUIET_MS");
     char *end = NULL;
@@ -277,11 +268,99 @@ static int find_event_name(const char *line, char *buf, size_t len) {
     return 0;
 }
 
+struct input_block {
+    char name[256];
+    char handlers[1024];
+};
+
+static void reset_input_block(struct input_block *block) {
+    block->name[0] = '\0';
+    block->handlers[0] = '\0';
+}
+
+static void parse_input_line(struct input_block *block, const char *line) {
+    if (strncmp(line, "N: Name=", 8) == 0) {
+        snprintf(block->name, sizeof block->name, "%s", line + 8);
+        block->name[strcspn(block->name, "\r\n")] = '\0';
+        if (block->name[0] == '"' && strlen(block->name) > 1) {
+            memmove(block->name, block->name + 1, strlen(block->name));
+            block->name[strcspn(block->name, "\"")] = '\0';
+        }
+    } else if (strncmp(line, "H: Handlers=", 12) == 0) {
+        snprintf(block->handlers, sizeof block->handlers, "%s", line);
+        block->handlers[strcspn(block->handlers, "\r\n")] = '\0';
+    }
+}
+
+static int block_event_path(const struct input_block *block, char *path, size_t len) {
+    char event[64];
+
+    if (find_event_name(block->handlers, event, sizeof event) < 0)
+        return -1;
+
+    snprintf(path, len, "/dev/input/%s", event);
+    return 0;
+}
+
+static int is_z13_touchpad_block(const struct input_block *block) {
+    return strstr(block->name, "GZ302EA-Keyboard Touchpad") != NULL ||
+           strstr(block->name, "Touchpad") != NULL;
+}
+
+static int is_z13_keyboard_block(const struct input_block *block) {
+    if (!strstr(block->handlers, "kbd"))
+        return 0;
+
+    return strstr(block->name, "GZ302EA-Keyboard") != NULL ||
+           strstr(block->name, "N-KEY Device") != NULL;
+}
+
+static int discover_touchpad(char *path, size_t len) {
+    const char *env_path = getenv("Z13_DWT_TOUCHPAD");
+    FILE *fp;
+    char line[1024];
+    struct input_block block;
+
+    if (env_path && *env_path) {
+        snprintf(path, len, "%s", env_path);
+        printf("touchpad candidate path=%s source=env\n", path);
+        return 0;
+    }
+
+    fp = fopen("/proc/bus/input/devices", "r");
+    if (!fp)
+        die("open /proc/bus/input/devices");
+
+    reset_input_block(&block);
+    while (fgets(line, sizeof line, fp)) {
+        if (line[0] == '\n') {
+            if (is_z13_touchpad_block(&block) && block_event_path(&block, path, len) == 0) {
+                printf("touchpad candidate path=%s name=\"%s\" source=auto\n", path, block.name);
+                fclose(fp);
+                return 0;
+            }
+            reset_input_block(&block);
+            continue;
+        }
+        parse_input_line(&block, line);
+    }
+
+    if (is_z13_touchpad_block(&block) && block_event_path(&block, path, len) == 0) {
+        printf("touchpad candidate path=%s name=\"%s\" source=auto\n", path, block.name);
+        fclose(fp);
+        return 0;
+    }
+
+    fclose(fp);
+    return -1;
+}
+
 static int discover_keyboards(const char *touchpad_path, char paths[][PATH_MAX], int max_paths) {
     char skip[64] = {0};
     FILE *fp;
     char line[1024];
     int count = 0;
+    struct input_block block;
 
     if (touchpad_event_name(touchpad_path, skip, sizeof skip) < 0) {
         fprintf(stderr, "warn: could not resolve touchpad event name for %s\n", touchpad_path);
@@ -292,19 +371,36 @@ static int discover_keyboards(const char *touchpad_path, char paths[][PATH_MAX],
     if (!fp)
         die("open /proc/bus/input/devices");
 
+    reset_input_block(&block);
     while (fgets(line, sizeof line, fp) && count < max_paths) {
+        if (line[0] == '\n') {
+            char event[64];
+
+            if (is_z13_keyboard_block(&block) &&
+                find_event_name(block.handlers, event, sizeof event) == 0 &&
+                (!skip[0] || strcmp(event, skip) != 0)) {
+                snprintf(paths[count], PATH_MAX, "/dev/input/%s", event);
+                printf("keyboard candidate path=%s name=\"%s\" source=auto\n",
+                       paths[count], block.name);
+                count++;
+            }
+            reset_input_block(&block);
+            continue;
+        }
+        parse_input_line(&block, line);
+    }
+
+    if (count < max_paths) {
         char event[64];
 
-        if (strncmp(line, "H: Handlers=", 12) != 0 || !strstr(line, "kbd"))
-            continue;
-        if (find_event_name(line, event, sizeof event) < 0)
-            continue;
-        if (skip[0] && strcmp(event, skip) == 0)
-            continue;
-
-        snprintf(paths[count], PATH_MAX, "/dev/input/%s", event);
-        printf("keyboard candidate path=%s source=auto\n", paths[count]);
-        count++;
+        if (is_z13_keyboard_block(&block) &&
+            find_event_name(block.handlers, event, sizeof event) == 0 &&
+            (!skip[0] || strcmp(event, skip) != 0)) {
+            snprintf(paths[count], PATH_MAX, "/dev/input/%s", event);
+            printf("keyboard candidate path=%s name=\"%s\" source=auto\n",
+                   paths[count], block.name);
+            count++;
+        }
     }
 
     fclose(fp);
@@ -328,7 +424,8 @@ int main(int argc, char **argv) {
 
     setvbuf(stdout, NULL, _IOLBF, 0);
 
-    const char *touchpad_path = argc >= 3 ? argv[1] : default_touchpad_path();
+    char auto_touchpad_path[PATH_MAX];
+    const char *touchpad_path = NULL;
     const long long quiet_ms = quiet_period_ms();
     struct kwin_target kwin = {0};
     int kfds[16];
@@ -338,11 +435,17 @@ int main(int argc, char **argv) {
     int keyboard_count = 0;
 
     if (argc >= 3) {
+        touchpad_path = argv[1];
         for (int i = 2; i < argc && keyboard_count < (int)(sizeof keyboard_paths / sizeof keyboard_paths[0]); i++) {
             keyboard_paths[keyboard_count++] = argv[i];
             printf("keyboard candidate path=%s source=argv\n", argv[i]);
         }
     } else {
+        if (discover_touchpad(auto_touchpad_path, sizeof auto_touchpad_path) < 0) {
+            fprintf(stderr, "failed to auto-detect touchpad; set Z13_DWT_TOUCHPAD or pass devices explicitly\n");
+            return 1;
+        }
+        touchpad_path = auto_touchpad_path;
         keyboard_count = discover_keyboards(touchpad_path, discovered,
                                             (int)(sizeof discovered / sizeof discovered[0]));
         for (int i = 0; i < keyboard_count; i++)
