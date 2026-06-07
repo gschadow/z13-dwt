@@ -1,3 +1,5 @@
+# Copyright (c) 2026, Gunther Schadow. All rights reserved.
+
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 SYSTEMD_UNITDIR ?= /etc/systemd/system
