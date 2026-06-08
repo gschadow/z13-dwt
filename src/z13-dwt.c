@@ -407,6 +407,12 @@ static int discover_keyboards(const char *touchpad_path, char paths[][PATH_MAX],
     return count;
 }
 
+static inline int is_modifier_key(__u16 code) {
+    return (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT ||
+            code == KEY_LEFTCTRL  || code == KEY_RIGHTCTRL  ||
+            code == KEY_LEFTALT   || code == KEY_RIGHTALT);
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && argc < 3) {
         fprintf(stderr,
@@ -507,6 +513,8 @@ int main(int argc, char **argv) {
             while ((n = read(fds[i].fd, &ev, sizeof ev)) > 0) {
                 if (n != sizeof ev)
                     continue;
+		if (is_modifier_key(ev.code))
+		  continue;		
                 if (ev.type == EV_KEY && ev.value != 0) {
                     reenable_at_ms = now_ms() + quiet_ms;
                     if (!tap_disabled) {
